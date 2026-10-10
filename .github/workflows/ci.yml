@@ -24,7 +24,7 @@ jobs:
       - name: Plugin parses and passes its tests
         run: |
           node --check desktop/plugin.js
-          node --test tests/
+          node --test tests/plugin.test.mjs
 
       - name: Install and uninstall into a throwaway Hermes home
         shell: bash

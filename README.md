@@ -108,7 +108,7 @@ gives it. The installer only copies files into your Hermes home and, with
 ## Development
 
 ```sh
-node --test tests/              # import contract + word detection
+node --test tests/plugin.test.mjs   # import contract + word detection
 python3 tools/make-pet.py       # rebuild pet/eyes (needs ImageMagick)
 ```
 
