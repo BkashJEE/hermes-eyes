@@ -1,0 +1,7 @@
+{
+  "id": "eyes",
+  "displayName": "Eyes",
+  "description": "Round googly eyes that act out what your agent is doing: they look around when idle, dart while it works, look up while it thinks, down at your input while it waits, smile when it finishes, hop when it celebrates and droop when something fails.",
+  "spritesheetPath": "spritesheet.webp",
+  "createdBy": "hermes-eyes"
+}

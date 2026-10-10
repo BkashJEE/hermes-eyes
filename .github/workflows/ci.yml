@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Plugin parses and passes its tests
+        run: |
+          node --check desktop/plugin.js
+          node --test tests/
+
+      - name: Install and uninstall into a throwaway Hermes home
+        shell: bash
+        run: |
+          home="$RUNNER_TEMP/hermes-home"
+          mkdir -p "$home/profiles/ada"
+          touch "$home/config.yaml" "$home/profiles/ada/config.yaml"
+          python install.py --hermes-home "$home" --dry-run --all-profiles
+          python install.py --hermes-home "$home" --all-profiles
+          python - "$home" <<'EOF'
+          import sys
+          from pathlib import Path
+          home = Path(sys.argv[1])
+          want = [
+              home / "desktop-plugins/hermes-eyes/plugin.js",
+              home / "pets/eyes/pet.json",
+              home / "pets/eyes/spritesheet.webp",
+              home / "profiles/ada/pets/eyes/pet.json",
+              home / "profiles/ada/pets/eyes/spritesheet.webp",
+          ]
+          missing = [str(p) for p in want if not p.is_file()]
+          assert not missing, f"not installed: {missing}"
+          EOF
+          python install.py --hermes-home "$home" --all-profiles --uninstall
+          python - "$home" <<'EOF'
+          import sys
+          from pathlib import Path
+          home = Path(sys.argv[1])
+          left = [str(p) for p in [home / "desktop-plugins/hermes-eyes", home / "pets/eyes", home / "profiles/ada/pets/eyes"] if p.exists()]
+          assert not left, f"left behind: {left}"
+          EOF
+          if python install.py --hermes-home "$home" --profile nope; then echo "accepted an unknown profile"; exit 1; fi
