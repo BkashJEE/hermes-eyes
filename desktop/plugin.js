@@ -731,7 +731,7 @@ function stepGlows(now) {
       Object.assign(e.style, {
         position: 'fixed',
         pointerEvents: 'none',
-        zIndex: '2147482998',
+        zIndex: '44',
         borderRadius: '5px',
         background: 'rgba(182,156,255,.26)',
         boxShadow: '0 0 0 1px rgba(182,156,255,.55), 0 0 14px rgba(139,108,240,.55)'
@@ -813,7 +813,7 @@ function tag(text, x, y, color) {
     left: `${x}px`,
     top: `${y}px`,
     transform: 'translate(-50%, -100%)',
-    zIndex: '2147483002',
+    zIndex: '46',
     pointerEvents: 'none',
     whiteSpace: 'nowrap',
     font: "500 11px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif",
@@ -910,7 +910,7 @@ function updateAttention(from) {
     Object.assign(ring.style, {
       position: 'fixed',
       pointerEvents: 'none',
-      zIndex: '2147482999',
+      zIndex: '44',
       borderRadius: '12px',
       boxSizing: 'border-box',
       border: '2px solid rgba(255,191,0,.85)'
@@ -1073,7 +1073,7 @@ function mountEyes() {
     top: `${Math.min(window.innerHeight - H, Math.max(0, saved?.top ?? window.innerHeight - H - 138))}px`,
     width: `${W}px`,
     height: `${H}px`,
-    zIndex: '2147483000',
+    zIndex: '45', // under Hermes's menus and dialogs (50)
     cursor: 'grab',
     filter: 'drop-shadow(0 3px 6px rgba(0,0,0,.35))',
     transition: 'transform 180ms ease',
@@ -1135,7 +1135,7 @@ function mountEyes() {
   const bubble = document.createElement('div')
   Object.assign(bubble.style, {
     position: 'fixed',
-    zIndex: '2147483002',
+    zIndex: '46',
     pointerEvents: 'none',
     whiteSpace: 'nowrap',
     font: "500 11.5px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif",
