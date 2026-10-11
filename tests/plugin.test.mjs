@@ -18,12 +18,15 @@ test('has a default export with register()', () => {
 })
 
 // The word scanner, lifted out of the plugin so it runs on its own.
-function wordScanner() {
+function wordScanner(opts = { words: true }) {
   const start = src.indexOf('const WORD_GAP')
   const end = src.indexOf('function tagText')
   assert.ok(start > 0 && end > start, 'word scanner section not found')
-  const body = src.slice(start, end) + '\nreturn { scanWords, words, feed(t) { replyText += t } }'
-  return new Function(body)()
+  const body =
+    'const settings = opts; const calm = () => false;\n' +
+    src.slice(start, end) +
+    '\nreturn { scanWords, words, feed(t) { replyText += t } }'
+  return new Function('opts', body)(opts)
 }
 
 test('picks files, paths, commands, links and numbers from a streamed reply', () => {
@@ -49,4 +52,17 @@ test('picks files, paths, commands, links and numbers from a streamed reply', ()
     '1.2s',
     'package.json'
   ])
+})
+
+test('glowing words can be switched off', () => {
+  const s = wordScanner({ words: false })
+  s.feed('I edited src/app.js and ran `npm test` in 42s. ')
+  s.scanWords()
+  assert.equal(s.words.length, 0)
+})
+
+test('settings have defaults for every choice the list offers', () => {
+  for (const key of ['motion', 'letters', 'speed', 'words', 'stuck', 'size']) {
+    assert.match(src, new RegExp(`DEFAULTS = \\{[^}]*\\b${key}:`), `no default for ${key}`)
+  }
 })

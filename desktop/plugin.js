@@ -135,7 +135,6 @@ const busySince = new Map() // runtime id -> when it started working
 // the tool it is running, so the eyes can say what it is up to and notice when
 // a working chat has gone quiet for a long time.
 
-const STUCK_MS = 3 * 60 * 1000
 const activity = new Map() // runtime id -> { at, tool, wroteAt }
 
 function touch(sid, patch) {
@@ -160,7 +159,7 @@ function isStuck(sid) {
   if (!sid || !(host.state.busyBySession?.get?.() || {})[sid]) return false
   const w = waiting.get(sid)
   if (w && w.reason !== 'stuck') return false
-  return quietFor(sid) > (store?.get?.('stuckMs', STUCK_MS) ?? STUCK_MS)
+  return settings.stuck > 0 && quietFor(sid) > settings.stuck * 60 * 1000
 }
 
 function checkStuck() {
@@ -333,6 +332,34 @@ function onActivity() {
   backFromAway()
 }
 
+// --- settings ---------------------------------------------------------------------------
+//
+// Kept in the plugin storage Hermes gives the plugin, changed from the eyes'
+// list. "motion" sets how lively the eyes are: 'auto' follows the system's
+// reduce-motion setting, 'calm' keeps every alert (waiting, the approval ring,
+// while you were away) and drops the flying letters, words, sparks, hearts
+// and hops.
+
+const DEFAULTS = { motion: 'auto', letters: true, speed: 'normal', words: true, stuck: 3, size: 'normal' }
+const SPEEDS = { slow: 170, normal: 110, fast: 70 } // ms between letters
+const SIZES = { small: 0.8, normal: 1, large: 1.25 }
+const settings = { ...DEFAULTS }
+const reduceMotion = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-reduced-motion: reduce)') : null
+
+function loadSettings() {
+  for (const key of Object.keys(DEFAULTS)) settings[key] = store?.get?.(`opt.${key}`, DEFAULTS[key]) ?? DEFAULTS[key]
+}
+
+function setOpt(key, value) {
+  settings[key] = value
+  store?.set?.(`opt.${key}`, value)
+  notify()
+}
+
+function calm() {
+  return settings.motion === 'calm' || (settings.motion === 'auto' && !!reduceMotion?.matches)
+}
+
 // --- letters from the reply ------------------------------------------------------------
 //
 // message.delta carries the reply text as it streams, and Hermes draws it the
@@ -341,7 +368,6 @@ function onActivity() {
 // lands on the last character of the reply on screen. Only the newest few are
 // kept: the eyes always shoot what is being written right now, never a backlog.
 
-const SHOT_GAP = 110 // ms between letters: about nine a second, readable
 const FLIGHT_MS = 420 // how long one letter is in the air
 const KEEP = 3 // newest letters held; older ones are dropped to stay in sync
 
@@ -365,7 +391,7 @@ function onReplyDelta(event) {
     if (streaming.length > 1 || (streaming.length === 1 && streaming[0] !== sid)) return
   }
   const text = String(event?.payload?.text || '')
-  for (const ch of text) if (ch.trim()) letters.push(ch)
+  if (settings.letters && !calm()) for (const ch of text) if (ch.trim()) letters.push(ch)
   if (letters.length > KEEP) letters.splice(0, letters.length - KEEP)
   const key = sid || 'focused'
   if (key !== replySid) resetReply(key)
@@ -584,6 +610,7 @@ const WORD_RE = new RegExp(
 )
 
 function resetReply(sid) {
+  if (sid) copyable.length = 0 // a new reply: the last one's words are gone
   replySid = sid
   replyText = ''
   scanned = 0
@@ -621,6 +648,7 @@ function scanWords() {
     const w = wordFrom(m)
     if (!w || w.length > 64 || shotWords.has(w)) continue
     shotWords.add(w)
+    if (!settings.words || calm()) continue
     words.push({ text: w, range: null, missedAt: 0 })
     if (words.length > 2) words.shift() // only the newest: stay in step with the reply
   }
@@ -746,8 +774,96 @@ function shootWord(w, from, fallback) {
     style: WORD_STYLE,
     duration: WORD_FLIGHT_MS,
     target: () => wordPoint(w),
-    onLand: () => glow(w)
+    onLand: () => {
+      glow(w)
+      copyable.push(w)
+      if (copyable.length > 40) copyable.shift()
+    }
   })
+}
+
+// --- click a word to copy it ---------------------------------------------------------
+//
+// The words that flew out of this reply (file names, commands, links,
+// numbers) stay clickable: hovering one says so, a click copies it.
+
+const copyable = [] // words shot in the current reply, newest last
+let osApi = null // ctx.os, set in register()
+let hint = null
+let copyCursor = null
+let lastHover = 0
+
+function wordAt(x, y) {
+  const body = replyBody()
+  const b = body?.getBoundingClientRect()
+  if (!b || x < b.left || x > b.right || y < b.top || y > b.bottom) return null
+  const now = performance.now()
+  for (let i = copyable.length - 1; i >= 0; i--) {
+    const rects = wordRects(copyable[i], now)
+    if (rects) for (const r of rects) if (x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2) return { w: copyable[i], r }
+  }
+  return null
+}
+
+function tag(text, x, y, color) {
+  const el = document.createElement('div')
+  el.textContent = text
+  Object.assign(el.style, {
+    position: 'fixed',
+    left: `${x}px`,
+    top: `${y}px`,
+    transform: 'translate(-50%, -100%)',
+    zIndex: '2147483002',
+    pointerEvents: 'none',
+    whiteSpace: 'nowrap',
+    font: "500 11px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif",
+    color: color || '#EEEEEC',
+    background: 'rgba(22,16,34,.94)',
+    border: '1px solid rgba(182,156,255,.5)',
+    borderRadius: '6px',
+    padding: '2px 7px'
+  })
+  document.body.appendChild(el)
+  return el
+}
+
+function setHover(hit) {
+  if (!hit) {
+    hint?.remove()
+    hint = null
+    copyCursor?.remove()
+    copyCursor = null
+    return
+  }
+  hint?.remove()
+  hint = tag('click to copy', hit.r.left + hit.r.width / 2, hit.r.top - 4)
+  if (!copyCursor) {
+    copyCursor = document.createElement('style')
+    copyCursor.textContent = '*{cursor:copy!important}'
+    document.head.appendChild(copyCursor)
+  }
+}
+
+function onWordHover(e) {
+  if (!copyable.length) return
+  const now = performance.now()
+  if (now - lastHover < 80) return
+  lastHover = now
+  setHover(wordAt(e.clientX, e.clientY))
+}
+
+function onWordClick(e) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !copyable.length) return
+  if (String(window.getSelection?.() || '')) return // selecting text, not clicking a word
+  if (e.target?.closest?.('a, button, [role="button"], input, textarea, [contenteditable="true"]')) return
+  const hit = wordAt(e.clientX, e.clientY)
+  if (!hit) return
+  setHover(null)
+  Promise.resolve(osApi?.writeClipboard?.(hit.w.text)).then(ok => {
+    const done = tag(ok ? 'Copied' : 'Could not copy', hit.r.left + hit.r.width / 2, hit.r.top - 4, ok ? '#8AE234' : '#FFBF00')
+    setTimeout(() => done.remove(), 900)
+  })
+  if (!calm()) glow(hit.w)
 }
 
 // --- something needs you, right here -------------------------------------------------
@@ -800,7 +916,7 @@ function updateAttention(from) {
       border: '2px solid rgba(255,191,0,.85)'
     })
     document.body.appendChild(ring)
-    ring.animate(
+    if (!calm()) ring.animate(
       [
         { boxShadow: '0 0 0 0 rgba(255,191,0,.55)', opacity: 1 },
         { boxShadow: '0 0 0 12px rgba(255,191,0,0)', opacity: 0.55 }
@@ -1126,7 +1242,7 @@ function mountEyes() {
     if (wasBusy && !busy && busyStart && now - busyStart > BIG_FINISH_MS && now >= worryUntil) {
       const a = eyesApi.pupil(0)
       const b = eyesApi.pupil(1)
-      burst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, SPARKS)
+      if (!calm()) burst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, SPARKS)
     }
     if (wasBusy && !busy) happyUntil = now + 1500
 
@@ -1134,7 +1250,7 @@ function mountEyes() {
     if (drag && !drag.moved && now - drag.at > 450) petting = true
     if (petting) {
       happyUntil = Math.max(happyUntil, now + 200)
-      if (now - lastHeart > 260) {
+      if (now - lastHeart > 260 && !calm()) {
         lastHeart = now
         const er = el.getBoundingClientRect()
         burst({ x: er.left + er.width * (0.25 + Math.random() * 0.5), y: er.top + 6 }, HEARTS)
@@ -1162,7 +1278,7 @@ function mountEyes() {
       const b = eyesApi.pupil(1)
       shootWord(words.shift(), { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, aim || aimAt())
     }
-    if (letters.length && now - lastShot > SHOT_GAP && now > quietUntil) {
+    if (letters.length && now - lastShot > (SPEEDS[settings.speed] || 110) && now > quietUntil) {
       lastShot = now
       aimUntil = now + FLIGHT_MS + 200
       fire(letters.shift(), eyesApi.pupil(shotEye), aim)
@@ -1315,7 +1431,11 @@ function mountEyes() {
     happies.forEach(h => (h.style.display = happy ? '' : 'none'))
 
     // A little hop every two seconds while chats are waiting on you.
-    el.style.transform = shaking && !away
+    el.style.scale = String(SIZES[settings.size] || 1)
+    el.style.transformOrigin = '50% 100%'
+    el.style.transform = calm()
+      ? ''
+      : shaking && !away
       ? `translateX(${(Math.sin(now / 38) * 1.6).toFixed(2)}px)`
       : !away && needsYou && idle && Math.floor(now / 2000) % 2 === 0 && now % 2000 < 260
         ? 'translateY(-5px)'
@@ -1406,6 +1526,86 @@ function Row({ item }) {
   })
 }
 
+// One setting: a label and a row of choices, the current one highlighted.
+function Choice({ label, note, value, options, onPick }) {
+  return jsxs('div', {
+    className: 'flex items-center justify-between gap-3 px-2.5 py-1.5',
+    children: [
+      jsxs('div', {
+        className: 'min-w-0',
+        children: [
+          jsx('div', { className: 'text-[0.75rem] text-(--ui-text-secondary)', children: label }),
+          note ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: note }) : null
+        ]
+      }),
+      jsx('div', {
+        className: 'inline-flex shrink-0 gap-0.5 rounded-md p-0.5',
+        style: { boxShadow: 'inset 0 0 0 1px var(--ui-stroke-secondary)' },
+        children: options.map(([v, text]) =>
+          jsx(
+            'button',
+            {
+              type: 'button',
+              'aria-pressed': v === value,
+              className: 'rounded px-2 py-0.5 text-[0.6875rem] transition-colors',
+              style:
+                v === value
+                  ? { background: 'var(--ui-accent)', color: '#fff' }
+                  : { color: 'var(--ui-text-tertiary)' },
+              onClick: () => onPick(v),
+              children: text
+            },
+            String(v)
+          )
+        )
+      })
+    ]
+  })
+}
+
+function SettingsView() {
+  const onOff = [[true, 'On'], [false, 'Off']]
+  const auto = settings.motion === 'auto'
+  return jsxs('div', {
+    className: 'flex flex-col gap-0.5',
+    children: [
+      jsx(Choice, {
+        label: 'Motion',
+        note: auto ? (reduceMotion?.matches ? 'Calm now: your system asks for less motion' : 'Follows your system setting') : settings.motion === 'calm' ? 'Alerts only, nothing flies' : null,
+        value: settings.motion,
+        options: [['auto', 'Auto'], ['full', 'Full'], ['calm', 'Calm']],
+        onPick: v => setOpt('motion', v)
+      }),
+      jsx(Choice, { label: 'Flying letters', value: settings.letters, options: onOff, onPick: v => setOpt('letters', v) }),
+      jsx(Choice, {
+        label: 'Letter speed',
+        value: settings.speed,
+        options: [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']],
+        onPick: v => setOpt('speed', v)
+      }),
+      jsx(Choice, {
+        label: 'Glowing words',
+        note: 'Click one to copy it',
+        value: settings.words,
+        options: onOff,
+        onPick: v => setOpt('words', v)
+      }),
+      jsx(Choice, {
+        label: '"Might be stuck" after',
+        value: settings.stuck,
+        options: [[0, 'Off'], [3, '3m'], [5, '5m'], [10, '10m']],
+        onPick: v => setOpt('stuck', v)
+      }),
+      jsx(Choice, {
+        label: 'Eye size',
+        value: settings.size,
+        options: [['small', 'S'], ['normal', 'M'], ['large', 'L']],
+        onPick: v => setOpt('size', v)
+      })
+    ]
+  })
+}
+
 function EyesChip() {
   useTicker()
   const [visible, setVisible] = useState(() => (store ? store.get('visible', true) : true))
@@ -1415,7 +1615,16 @@ function EyesChip() {
   const count = waiting.size
   const problems = [...waiting.values()].filter(w => w.reason === 'error').length
   const items = ui.open ? (ui.mode === 'waiting' ? itemsFrom(waiting) : ui.items) : []
-  const heading = ui.mode === 'away' ? 'While you were away' : problems ? 'Needs a look' : count ? 'Waiting on you' : 'All clear'
+  const heading =
+    ui.mode === 'settings'
+      ? 'Hermes Eyes settings'
+      : ui.mode === 'away'
+        ? 'While you were away'
+        : problems
+          ? 'Needs a look'
+          : count
+            ? 'Waiting on you'
+            : 'All clear'
 
   const trigger = jsxs('button', {
     type: 'button',
@@ -1471,7 +1680,9 @@ function EyesChip() {
               className: 'px-2.5 pt-1.5 pb-1 text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary)',
               children: heading
             }),
-            ...(items.length
+            ...(ui.mode === 'settings'
+              ? [jsx(SettingsView, {})]
+              : items.length
               ? items.map(item => jsx(Row, { item }, item.sid))
               : [
                   jsx('div', {
@@ -1503,6 +1714,16 @@ function EyesChip() {
                 setVisible(next)
               },
               children: visible ? 'Hide the eyes' : 'Show the eyes'
+            }),
+            jsx('button', {
+              type: 'button',
+              className:
+                'rounded-md px-2.5 py-1.5 text-left text-[0.75rem] text-(--ui-text-secondary) transition-colors hover:bg-(--ui-control-hover-background)',
+              onClick: () => {
+                ui.mode = ui.mode === 'settings' ? 'waiting' : 'settings'
+                notify()
+              },
+              children: ui.mode === 'settings' ? '← Back' : 'Settings…'
             })
           ]
         })
@@ -1587,6 +1808,8 @@ export default {
   name: 'Hermes Eyes',
   register(ctx) {
     store = ctx.storage
+    osApi = ctx.os
+    loadSettings()
 
     // Store subscriptions go through onDispose and events through ctx.onEvent,
     // so a reload or disable takes every one of them down.
@@ -1609,6 +1832,9 @@ export default {
     })
     ctx.setInterval(checkAway, 5000)
     ctx.setInterval(checkStuck, 5000)
+    ctx.addEventListener(window, 'click', onWordClick)
+    ctx.addEventListener(window, 'mousemove', onWordHover, { passive: true })
+    ctx.onDispose(() => setHover(null))
 
     // Agents' display names ("Ada — Research" -> "Ada") for the list.
     host
@@ -1643,6 +1869,20 @@ export default {
     })
     ctx.register({ id: 'team', area: 'statusBar.right', order: 119, render: () => jsx(TeamChip, {}) })
     ctx.register({ id: 'open', area: ROUTES_AREA, data: { path: '/hermes-eyes-open' }, render: () => jsx(OpenPage, {}) })
+    ctx.register({
+      id: 'settings',
+      area: PALETTE_AREA,
+      data: {
+        id: 'hermes-eyes.settings',
+        label: 'Hermes Eyes: settings',
+        keywords: ['eyes', 'settings', 'calm', 'motion', 'letters', 'speed', 'size'],
+        run: () => {
+          ui.mode = 'settings'
+          ui.open = true
+          notify()
+        }
+      }
+    })
     ctx.register({
       id: 'copy-resume',
       area: PALETTE_AREA,
