@@ -20,7 +20,7 @@ Two parts, install either or both:
 - As a reply streams in, its letters fly out of the eyes and land on the
   newest word.
 - File names, commands, links and numbers fly out whole, as a little tag, and
-  make that word glow in the reply.
+  make that word glow in the reply. **Click one to copy it.**
 
 **They point at what needs you**
 - An approval or a question in the chat in front of you: the eyes shoot a "!"
@@ -40,6 +40,14 @@ Two parts, install either or both:
 - Press and hold to pet them: happy eyes and little hearts.
 - A task that ran over a minute finishes: a burst of sparks.
 - Drag them anywhere; the list can put them back, or hide them.
+
+**Make them yours**: open the eyes' list → **Settings…**, or run
+*Hermes Eyes: settings* from the command palette.
+- **Motion**: Auto (follows your system's reduce-motion setting), Full, or
+  **Calm**: every alert stays (waiting, the approval ring, while you were away),
+  nothing flies.
+- Flying letters on/off and their speed, glowing words on/off, when "might be
+  stuck" shows (or never), and eye size.
 
 While the eyes show, Hermes's own floating pet is hidden in that window.
 
@@ -108,7 +116,7 @@ gives it. The installer only copies files into your Hermes home and, with
 ## Development
 
 ```sh
-node --test tests/plugin.test.mjs   # import contract + word detection
+node --test tests/plugin.test.mjs   # import contract, word detection, settings
 python3 tools/make-pet.py       # rebuild pet/eyes (needs ImageMagick)
 ```
 
