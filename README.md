@@ -4,7 +4,7 @@ A pet for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that
 works for you: a pair of googly eyes that watch your agents so you don't have
 to keep checking every chat.
 
-<!-- demo GIF goes here -->
+![A reply in Hermes Desktop: file names and commands glowing, the eyes smiling on the message box](docs/desktop.png)
 
 Two parts, install either or both:
 
@@ -53,7 +53,7 @@ classic CLI, the TUI and Desktop.
 
 ## Install
 
-**Ask your Hermes agent** (after this repository is public):
+**Ask your Hermes agent**:
 
 ```sh
 hermes skills install https://raw.githubusercontent.com/BkashJEE/hermes-eyes/main/skills/install-hermes-eyes/SKILL.md
@@ -108,7 +108,7 @@ gives it. The installer only copies files into your Hermes home and, with
 ## Development
 
 ```sh
-node --test tests/              # import contract + word detection
+node --test tests/plugin.test.mjs   # import contract + word detection
 python3 tools/make-pet.py       # rebuild pet/eyes (needs ImageMagick)
 ```
 
